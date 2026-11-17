@@ -324,7 +324,10 @@ def view_room(room_id):
 
 
 @sock.route("/ws/host/<room_id>")
-def ws_host(ws, room_id):
+# Backward-compatible alias for older app settings that saved the public
+# viewer URL as the relay base URL.
+@sock.route("/view/<viewer_room_id>/ws/host/<room_id>")
+def ws_host(ws, room_id, viewer_room_id=None):
     with rooms_lock:
         host_sockets[room_id] = ws
         viewers = list(viewer_sockets[room_id])
