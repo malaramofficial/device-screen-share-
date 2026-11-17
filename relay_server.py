@@ -355,8 +355,10 @@ def ws_host(ws, room_id):
                 except Exception:
                     pass
             elif isinstance(msg, (bytes, bytearray)):
-                with rooms_lock:
-                    latest_frame[room_id] = bytes(msg)
+                # Cache only JPEG screen frames, never short-lived audio packets.
+                if not (len(msg) >= 4 and bytes(msg[:4]) == b"TCAU"):
+                    with rooms_lock:
+                        latest_frame[room_id] = bytes(msg)
             with rooms_lock:
                 viewers = list(viewer_sockets[room_id])
             for v in viewers:
