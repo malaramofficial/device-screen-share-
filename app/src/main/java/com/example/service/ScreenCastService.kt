@@ -54,6 +54,7 @@ class ScreenCastService : Service() {
   private var captureHandler: Handler? = null
   private var httpServer: NativeScreenHttpServer? = null
   private var relayClient: InternetRelayClient? = null
+  private var audioStreamer: AudioPlaybackStreamer? = null
 
   private var physicalWidth: Int = 1080
   private var physicalHeight: Int = 2400
@@ -256,6 +257,23 @@ class ScreenCastService : Service() {
     mediaProjection = projection
     projection.registerCallback(projectionCallback, handler)
 
+    // Capture media/game playback audio separately from the screen frames.
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+      checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    ) {
+      audioStreamer = AudioPlaybackStreamer(
+        projection = projection,
+        onPacket = { packet -> relay.sendAudioPacket(packet) },
+        onError = { message ->
+          _hostState.update { it.copy(errorMessage = "Audio capture: $message") }
+        },
+      ).also { it.start() }
+    } else {
+      _hostState.update {
+        it.copy(errorMessage = "Audio sharing is off. Allow the Microphone/Audio permission and restart screen sharing.")
+      }
+    }
+
     val reader = ImageReader.newInstance(streamWidth, streamHeight, PixelFormat.RGBA_8888, 2)
     imageReader = reader
     reader.setOnImageAvailableListener(
@@ -367,6 +385,8 @@ class ScreenCastService : Service() {
 
   private fun stopResourcesOnly() {
     captureHandler?.removeCallbacks(keepaliveRunnable)
+    runCatching { audioStreamer?.stop() }
+    audioStreamer = null
     runCatching { virtualDisplay?.release() }
     virtualDisplay = null
     runCatching { imageReader?.close() }
