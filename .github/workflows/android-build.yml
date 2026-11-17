@@ -54,10 +54,10 @@ jobs:
         run: gradle testDebugUnitTest --stacktrace
 
       - name: Run Android lint
-        run: ./gradlew lintDebug --stacktrace
+        run: gradle lintDebug --stacktrace
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug --stacktrace
+        run: gradle assembleDebug --stacktrace
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
