@@ -181,6 +181,14 @@ class InternetRelayClient(
     ws.send(jpegBytes.toByteString(0, jpegBytes.size))
   }
 
+  fun sendAudioPacket(packet: ByteArray) {
+    val ws = currentSocket ?: return
+    if (!active.get() || currentState.status != RelayConnectionStatus.CONNECTED) return
+    // Keep audio latency bounded; drop packets rather than building a stale queue.
+    if (ws.queueSize() > 256_000L) return
+    ws.send(packet.toByteString(0, packet.size))
+  }
+
   private fun handleServerMessage(raw: String) {
     try {
       val json = JSONObject(raw)
