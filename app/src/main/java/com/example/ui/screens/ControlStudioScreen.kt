@@ -46,6 +46,7 @@ import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeveloperMode
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Layers
+import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.StopCircle
@@ -64,6 +65,7 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -95,6 +97,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.data.ServerProbeResult
+import com.example.service.RelayConnectionStatus
 import com.example.service.ScreenCastService
 import com.example.ui.AdbCommandLogEntry
 import com.example.ui.ControlCanvasMode
@@ -107,6 +110,10 @@ import com.example.ui.components.shareTextContent
 fun ControlStudioScreen(
   state: TermuxCastUiState,
   onRefreshTelemetry: () -> Unit,
+  onUpdateRelayUrl: (String) -> Unit,
+  onToggleInternetRelay: (Boolean) -> Unit,
+  onRegenerateRoomId: () -> Unit,
+  onOpenRelayServerFile: () -> Unit,
   onUpdateServerUrl: (String) -> Unit,
   onProbeServer: () -> Unit,
   onSetControlMode: (ControlCanvasMode) -> Unit,
@@ -140,6 +147,9 @@ fun ControlStudioScreen(
             action = ScreenCastService.ACTION_START
             putExtra(ScreenCastService.EXTRA_RESULT_CODE, result.resultCode)
             putExtra(ScreenCastService.EXTRA_RESULT_DATA, result.data)
+            putExtra(ScreenCastService.EXTRA_RELAY_ENABLED, state.relayEnabled)
+            putExtra(ScreenCastService.EXTRA_RELAY_URL, state.relayUrlInput)
+            putExtra(ScreenCastService.EXTRA_RELAY_ROOM_ID, state.roomId)
           }
         ContextCompat.startForegroundService(context, intent)
         onRefreshTelemetry()
@@ -210,6 +220,28 @@ fun ControlStudioScreen(
           shareTextContent(
             context,
             "Open this URL in browser to view & control phone",
+            url,
+          )
+        },
+      )
+    }
+
+    // 1b. Internet Anywhere Mode (WebSocket Relay Bridge)
+    item {
+      InternetRelayCard(
+        state = state,
+        onRelayUrlChange = onUpdateRelayUrl,
+        onToggleRelay = onToggleInternetRelay,
+        onRegenerateRoom = onRegenerateRoomId,
+        onOpenRelayFile = onOpenRelayServerFile,
+        onCopyUrl = { url ->
+          copyToClipboard(context, "Public Internet URL", url)
+          onShowMessage("Copied Internet URL: $url")
+        },
+        onShareUrl = { url ->
+          shareTextContent(
+            context,
+            "Control phone over Internet",
             url,
           )
         },
@@ -649,6 +681,201 @@ private fun NativeHostCard(
           text = if (isHosting) "Stop Screen Host" else "Start Screen Host & Get Live Stream",
           fontWeight = FontWeight.SemiBold,
         )
+      }
+    }
+  }
+}
+
+@Composable
+private fun InternetRelayCard(
+  state: TermuxCastUiState,
+  onRelayUrlChange: (String) -> Unit,
+  onToggleRelay: (Boolean) -> Unit,
+  onRegenerateRoom: () -> Unit,
+  onOpenRelayFile: () -> Unit,
+  onCopyUrl: (String) -> Unit,
+  onShareUrl: (String) -> Unit,
+) {
+  val relay = state.nativeHostState.internetRelay
+  val isConnected = relay.status == RelayConnectionStatus.CONNECTED
+  val isConnecting = relay.status == RelayConnectionStatus.CONNECTING
+
+  val statusLabel =
+    when (relay.status) {
+      RelayConnectionStatus.CONNECTED -> "ONLINE (${relay.viewerCount} viewers)"
+      RelayConnectionStatus.CONNECTING -> "CONNECTING"
+      RelayConnectionStatus.ERROR -> "ERROR"
+      RelayConnectionStatus.DISCONNECTED -> if (state.relayEnabled) "WAITING" else "OFF"
+    }
+  val statusColor =
+    when (relay.status) {
+      RelayConnectionStatus.CONNECTED -> MaterialTheme.colorScheme.primary
+      RelayConnectionStatus.CONNECTING -> MaterialTheme.colorScheme.tertiary
+      RelayConnectionStatus.ERROR -> MaterialTheme.colorScheme.error
+      RelayConnectionStatus.DISCONNECTED -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+  Surface(
+    shape = MaterialTheme.shapes.large,
+    color = MaterialTheme.colorScheme.surface,
+    border =
+      BorderStroke(
+        width = 1.dp,
+        color =
+          if (isConnected) MaterialTheme.colorScheme.secondary
+          else MaterialTheme.colorScheme.outline,
+      ),
+  ) {
+    Column(
+      modifier = Modifier.fillMaxWidth().padding(16.dp),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+      ) {
+        Row(
+          modifier = Modifier.weight(1f),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+          Icon(
+            imageVector = Icons.Rounded.Public,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.secondary,
+          )
+          Column {
+            Text(
+              text = "Internet Access (4G / 5G / Anywhere)",
+              style = MaterialTheme.typography.titleMedium,
+              fontWeight = FontWeight.Bold,
+            )
+            Text(
+              text = "Connects outbound via WebSocket Relay across different networks",
+              style = MaterialTheme.typography.bodyMedium,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+          }
+        }
+        Switch(
+          checked = state.relayEnabled,
+          onCheckedChange = { checked -> onToggleRelay(checked) },
+          modifier = Modifier.testTag("toggle_internet_relay_switch"),
+        )
+      }
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        StatusPill(
+          label = "Relay: $statusLabel",
+          dotColor = statusColor,
+          modifier = Modifier.weight(1f),
+        )
+        StatusPill(
+          label = "Room: ${state.roomId}",
+          dotColor = MaterialTheme.colorScheme.secondary,
+        )
+        IconButton(
+          onClick = onRegenerateRoom,
+          modifier = Modifier.size(48.dp).testTag("regenerate_room_button"),
+        ) {
+          Icon(
+            imageVector = Icons.Rounded.Refresh,
+            contentDescription = "New Room ID",
+            tint = MaterialTheme.colorScheme.secondary,
+          )
+        }
+      }
+
+      OutlinedTextField(
+        value = state.relayUrlInput,
+        onValueChange = onRelayUrlChange,
+        label = { Text("Relay Server URL (e.g. https://your-app.onrender.com)") },
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodySmall,
+        modifier = Modifier.fillMaxWidth().testTag("relay_url_input"),
+      )
+
+      if (state.publicInternetUrl.isNotBlank()) {
+        Surface(
+          shape = MaterialTheme.shapes.medium,
+          color = MaterialTheme.colorScheme.background,
+          border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        ) {
+          Row(
+            modifier =
+              Modifier.fillMaxWidth()
+                .padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Column(modifier = Modifier.weight(1f)) {
+              Text(
+                text = "PUBLIC INTERNET BROWSER URL",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+              Text(
+                text = state.publicInternetUrl,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.secondary,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+              )
+            }
+            IconButton(
+              onClick = { onCopyUrl(state.publicInternetUrl) },
+              modifier = Modifier.size(48.dp).testTag("copy_internet_url_button"),
+            ) {
+              Icon(
+                imageVector = Icons.Rounded.ContentCopy,
+                contentDescription = "Copy Internet URL",
+                tint = MaterialTheme.colorScheme.secondary,
+              )
+            }
+            IconButton(
+              onClick = { onShareUrl(state.publicInternetUrl) },
+              modifier = Modifier.size(48.dp).testTag("share_internet_url_button"),
+            ) {
+              Icon(
+                imageVector = Icons.Rounded.Share,
+                contentDescription = "Share Internet URL",
+                tint = MaterialTheme.colorScheme.primary,
+              )
+            }
+          }
+        }
+      }
+
+      relay.errorMessage?.let { err ->
+        Text(
+          text = err,
+          style = MaterialTheme.typography.labelMedium,
+          color = MaterialTheme.colorScheme.error,
+        )
+      }
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        Button(
+          onClick = { onToggleRelay(true) },
+          enabled = state.relayUrlInput.isNotBlank() && !isConnecting,
+          modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("connect_relay_button"),
+        ) {
+          Text(if (isConnected) "Reconnect Relay" else if (isConnecting) "Connecting..." else "Connect Internet Relay")
+        }
+        OutlinedButton(
+          onClick = onOpenRelayFile,
+          modifier = Modifier.heightIn(min = 48.dp).testTag("view_relay_server_button"),
+        ) {
+          Text("relay_server.py")
+        }
       }
     }
   }

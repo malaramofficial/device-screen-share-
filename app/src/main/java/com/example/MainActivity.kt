@@ -54,6 +54,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.ui.TermuxCastViewModel
 import com.example.ui.screens.ControlStudioScreen
+import com.example.ui.screens.ScreenShareGateScreen
 import com.example.ui.screens.ServerFilesScreen
 import com.example.ui.screens.TermuxSetupScreen
 import com.example.ui.theme.TermuxCastTheme
@@ -83,6 +84,16 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun TermuxCastApp(viewModel: TermuxCastViewModel = viewModel()) {
   val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+  // Mandatory Screen Share Gate: app remains locked until MediaProjection casting starts
+  if (!uiState.nativeHostState.isHosting) {
+    ScreenShareGateScreen(
+      state = uiState,
+      onRefreshTelemetry = viewModel::refreshTelemetry,
+    )
+    return
+  }
+
   val navController = rememberNavController()
   val navBackStackEntry by navController.currentBackStackEntryAsState()
   val currentDestination = navBackStackEntry?.destination
@@ -215,6 +226,13 @@ fun TermuxCastApp(viewModel: TermuxCastViewModel = viewModel()) {
               ControlStudioScreen(
                 state = uiState,
                 onRefreshTelemetry = viewModel::refreshTelemetry,
+                onUpdateRelayUrl = viewModel::updateRelayUrlInput,
+                onToggleInternetRelay = viewModel::applyInternetRelay,
+                onRegenerateRoomId = viewModel::regenerateRoomId,
+                onOpenRelayServerFile = {
+                  viewModel.selectFile("relay_py")
+                  navigateTo(ROUTE_SERVER_FILES)
+                },
                 onUpdateServerUrl = viewModel::updateServerUrl,
                 onProbeServer = viewModel::probeTermuxServer,
                 onSetControlMode = viewModel::setControlMode,

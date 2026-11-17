@@ -127,6 +127,8 @@ class TermuxBundleRepository(private val context: Context) {
     val requirements = readAsset("termux/requirements.txt")
     val appPy = readAsset("termux/app.py")
     val indexHtml = readAsset("termux/templates/index.html")
+    val relayPy = readAsset("termux/relay_server.py")
+    val relayReq = readAsset("termux/requirements_relay.txt")
     val installer = buildOneShotInstaller(requirements, appPy, indexHtml)
 
     return listOf(
@@ -152,10 +154,24 @@ class TermuxBundleRepository(private val context: Context) {
         content = requirements,
       ),
       ServerFileAsset(
+        id = "relay_py",
+        path = "relay_server.py",
+        language = "Python",
+        summary = "Public Internet WebSocket relay server (deploy on Render/Railway/Fly.io/VPS) so TermuxCast works over 4G/5G anywhere.",
+        content = relayPy,
+      ),
+      ServerFileAsset(
+        id = "relay_req",
+        path = "requirements_relay.txt",
+        language = "Text",
+        summary = "Dependencies for deploying relay_server.py (Flask, flask-sock, simple-websocket, gunicorn).",
+        content = relayReq,
+      ),
+      ServerFileAsset(
         id = "installer",
         path = "install_termuxcast.sh",
         language = "Bash",
-        summary = "One-paste Termux script that creates ~/termux-cast/ and writes all three project files cleanly.",
+        summary = "One-paste Termux script that creates ~/termux-cast/ and writes the Termux server files cleanly.",
         content = installer,
       ),
     )
@@ -230,5 +246,42 @@ class TermuxBundleRepository(private val context: Context) {
     val updated = getCompletedStepIds().toMutableSet()
     if (completed) updated.add(stepId) else updated.remove(stepId)
     prefs.edit().putStringSet("completed_steps", updated).apply()
+  }
+
+  fun getRelayUrl(): String {
+    val saved = prefs.getString("relay_url", null)
+    return if (saved.isNullOrBlank()) DEFAULT_RELAY_URL else saved
+  }
+
+  fun isRelayEnabled(): Boolean {
+    val hasExplicitToggle = prefs.contains("relay_enabled")
+    val savedUrl = prefs.getString("relay_url", null)
+    return if (!hasExplicitToggle || savedUrl.isNullOrBlank()) {
+      true
+    } else {
+      prefs.getBoolean("relay_enabled", true)
+    }
+  }
+
+  fun saveRelayConfig(url: String, enabled: Boolean) {
+    prefs.edit().putString("relay_url", url.trim()).putBoolean("relay_enabled", enabled).apply()
+  }
+
+  fun getOrCreateRoomId(): String {
+    val existing = prefs.getString("relay_room_id", null)
+    if (!existing.isNullOrBlank()) return existing
+    return regenerateRoomId()
+  }
+
+  fun regenerateRoomId(): String {
+    val chars = "abcdefghjkmnpqrstuvwxyz23456789"
+    val suffix = (1..6).map { chars.random() }.joinToString("")
+    val id = "tc-$suffix"
+    prefs.edit().putString("relay_room_id", id).apply()
+    return id
+  }
+
+  companion object {
+    const val DEFAULT_RELAY_URL = "https://termuxcast-internet-relay.onrender.com"
   }
 }

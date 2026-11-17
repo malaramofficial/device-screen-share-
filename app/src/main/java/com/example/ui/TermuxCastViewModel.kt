@@ -2,6 +2,7 @@ package com.example.ui
 
 import android.app.Application
 import android.content.ComponentName
+import android.content.Intent
 import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -9,6 +10,7 @@ import com.example.data.DeviceTelemetry
 import com.example.data.ServerFileAsset
 import com.example.data.ServerProbeResult
 import com.example.data.TermuxBundleRepository
+import com.example.service.InternetRelayClient
 import com.example.service.NativeHostState
 import com.example.service.RemoteControlAccessibilityService
 import com.example.service.ScreenCastService
@@ -43,6 +45,9 @@ data class TermuxCastUiState(
   val telemetry: DeviceTelemetry,
   val nativeHostState: NativeHostState = NativeHostState(),
   val accessibilityEnabled: Boolean = false,
+  val relayUrlInput: String = "",
+  val relayEnabled: Boolean = false,
+  val roomId: String = "",
   val serverUrlInput: String,
   val probeResult: ServerProbeResult = ServerProbeResult.Idle,
   val activeControlMode: ControlCanvasMode = ControlCanvasMode.COORDINATE_MAPPER,
@@ -66,6 +71,14 @@ data class TermuxCastUiState(
 
   val nativeHostAllUrls: List<String>
     get() = telemetry.candidateIps.map { ip -> "http://$ip:${nativeHostState.port}" }
+
+  val publicInternetUrl: String
+    get() {
+      val activeUrl = nativeHostState.internetRelay.publicViewUrl
+      if (activeUrl.isNotBlank()) return activeUrl
+      val normalized = InternetRelayClient.normalizeHttpBase(relayUrlInput)
+      return if (normalized.isNotBlank() && roomId.isNotBlank()) "$normalized/view/$roomId" else ""
+    }
 }
 
 enum class ControlCanvasMode {
@@ -86,7 +99,11 @@ class TermuxCastViewModel(application: Application) : AndroidViewModel(applicati
     val files = repository.loadBundledFiles()
     val completed = repository.getCompletedStepIds()
     val steps = buildSetupSteps(telemetry.localIp)
-    val initialAccess = isAccessibilityEnabledInSettings() || RemoteControlAccessibilityService.isConnected.value
+    val initialAccess =
+      isAccessibilityEnabledInSettings() || RemoteControlAccessibilityService.isConnected.value
+    val savedRelayUrl = repository.getRelayUrl()
+    val savedRelayEnabled = repository.isRelayEnabled()
+    val savedRoomId = repository.getOrCreateRoomId()
 
     _uiState =
       MutableStateFlow(
@@ -94,6 +111,9 @@ class TermuxCastViewModel(application: Application) : AndroidViewModel(applicati
           telemetry = telemetry,
           nativeHostState = ScreenCastService.hostState.value,
           accessibilityEnabled = initialAccess,
+          relayUrlInput = savedRelayUrl,
+          relayEnabled = savedRelayEnabled,
+          roomId = savedRoomId,
           serverUrlInput = "http://127.0.0.1:5000",
           setupSteps = steps,
           completedStepIds = completed,
@@ -151,6 +171,38 @@ class TermuxCastViewModel(application: Application) : AndroidViewModel(applicati
       enabled.split(':').any { ComponentName.unflattenFromString(it) == expected }
     } catch (_: Exception) {
       false
+    }
+  }
+
+  fun updateRelayUrlInput(url: String) {
+    _uiState.update { it.copy(relayUrlInput = url) }
+    repository.saveRelayConfig(url, _uiState.value.relayEnabled)
+  }
+
+  fun applyInternetRelay(enabled: Boolean) {
+    val currentUrl = _uiState.value.relayUrlInput
+    val roomId = _uiState.value.roomId
+    repository.saveRelayConfig(currentUrl, enabled)
+    _uiState.update { it.copy(relayEnabled = enabled) }
+
+    if (_uiState.value.nativeHostState.isHosting) {
+      val app = getApplication<Application>()
+      val intent =
+        Intent(app, ScreenCastService::class.java).apply {
+          action = ScreenCastService.ACTION_CONFIGURE_RELAY
+          putExtra(ScreenCastService.EXTRA_RELAY_ENABLED, enabled)
+          putExtra(ScreenCastService.EXTRA_RELAY_URL, currentUrl)
+          putExtra(ScreenCastService.EXTRA_RELAY_ROOM_ID, roomId)
+        }
+      app.startService(intent)
+    }
+  }
+
+  fun regenerateRoomId() {
+    val nextId = repository.regenerateRoomId()
+    _uiState.update { it.copy(roomId = nextId) }
+    if (_uiState.value.nativeHostState.isHosting && _uiState.value.relayEnabled) {
+      applyInternetRelay(true)
     }
   }
 
