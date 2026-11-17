@@ -286,12 +286,25 @@ class InternetRelayClient(
     fun normalizeHttpBase(raw: String): String {
       val trimmed = raw.trim().trimEnd('/')
       if (trimmed.isBlank()) return ""
-      return when {
+
+      val withScheme = when {
         trimmed.startsWith("wss://") -> "https://" + trimmed.removePrefix("wss://")
         trimmed.startsWith("ws://") -> "http://" + trimmed.removePrefix("ws://")
         trimmed.startsWith("https://") || trimmed.startsWith("http://") -> trimmed
         else -> "https://$trimmed"
       }
+
+      // Users sometimes paste the share/viewer URL instead of the relay server
+      // base URL. Strip the viewer path so WebSocket URLs are built from the
+      // origin, e.g. /view/abc/ws/host/xyz -> /ws/host/xyz.
+      return runCatching {
+        val uri = java.net.URI(withScheme)
+        val authority = uri.rawAuthority ?: return@runCatching withScheme
+        val cleanPath = (uri.rawPath ?: "")
+          .replace(Regex("/view/[^/]+/?$"), "")
+          .trimEnd('/')
+        "${uri.scheme}://${authority}${cleanPath}".trimEnd('/')
+      }.getOrDefault(withScheme)
     }
   }
 }
