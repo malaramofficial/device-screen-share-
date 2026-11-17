@@ -88,6 +88,7 @@ VIEWER_HTML = """<!DOCTYPE html>
       <div class="badges">
         <span id="resBadge" class="badge">-- x --</span>
         <span id="fpsBadge" class="badge">0 FPS</span>
+        <button id="audioEnable" class="badge" style="color:var(--text);cursor:pointer">🔊 Enable audio</button>
       </div>
     </header>
     <main id="stage" class="stage">
@@ -125,6 +126,9 @@ VIEWER_HTML = """<!DOCTYPE html>
     let frameTimestamps = [];
     let isDrawing = false;
     let pendingBlob = null;
+    let audioContext = null;
+    let audioEnabled = false;
+    let nextAudioTime = 0;
 
     function drawBlobFrame(blob) {
       if (isDrawing) {
@@ -163,6 +167,47 @@ VIEWER_HTML = """<!DOCTYPE html>
       img.src = url;
     }
 
+    function enableAudio() {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      if (!audioContext) audioContext = new AudioCtx();
+      audioContext.resume().then(() => {
+        audioEnabled = true;
+        document.getElementById("audioEnable").textContent = "🔊 Audio on";
+      }).catch(() => {
+        document.getElementById("audioEnable").textContent = "Tap to enable audio";
+      });
+    }
+
+    function playAudioPacket(buffer) {
+      if (!audioEnabled || !audioContext || buffer.byteLength < 10) return;
+      const view = new DataView(buffer);
+      if (view.getUint8(0) !== 0x54 || view.getUint8(1) !== 0x43 ||
+          view.getUint8(2) !== 0x41 || view.getUint8(3) !== 0x55) return;
+      const sampleRate = view.getInt32(4, true);
+      const channels = view.getInt16(8, true);
+      if (!sampleRate || channels < 1 || channels > 2) return;
+      const samples = (buffer.byteLength - 10) / 2;
+      const frames = Math.floor(samples / channels);
+      if (frames <= 0) return;
+      const audioBuffer = audioContext.createBuffer(channels, frames, sampleRate);
+      const pcm = new Int16Array(buffer, 10, frames * channels);
+      for (let ch = 0; ch < channels; ch++) {
+        const channelData = audioBuffer.getChannelData(ch);
+        for (let i = 0; i < frames; i++) {
+          channelData[i] = pcm[i * channels + ch] / 32768;
+        }
+      }
+      const source = audioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioContext.destination);
+      const startAt = Math.max(audioContext.currentTime + 0.035, nextAudioTime);
+      source.start(startAt);
+      nextAudioTime = startAt + audioBuffer.duration;
+    }
+
+    document.getElementById("audioEnable").addEventListener("click", enableAudio);
+
     function connect() {
       ws = new WebSocket(wsUrl);
       ws.binaryType = "arraybuffer";
@@ -192,6 +237,12 @@ VIEWER_HTML = """<!DOCTYPE html>
               overlayDesc.textContent = "Waiting for the phone to start screen sharing...";
             }
           } catch (_) {}
+          return;
+        }
+        const packet = ev.data instanceof ArrayBuffer ? ev.data : null;
+        if (packet && packet.byteLength >= 4 &&
+            new Uint8Array(packet, 0, 4).every((v, i) => v === [0x54, 0x43, 0x41, 0x55][i])) {
+          playAudioPacket(packet);
           return;
         }
         const blob = ev.data instanceof Blob ? ev.data : new Blob([ev.data], { type: "image/jpeg" });
