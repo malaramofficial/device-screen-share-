@@ -1,0 +1,6 @@
+{
+  "name": "TermuxCast",
+  "description": "Termux Python Flask & WebSocket screen streaming and remote touch control toolkit with live coordinate tester and setup guide.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

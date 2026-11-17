@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>TermuxCast — Remote Android Control</title>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --surface: #131a22;
+      --surface-elevated: #1a232e;
+      --border: #253241;
+      --text: #eef4f8;
+      --muted: #8fa3b8;
+      --accent: #10b981;
+      --accent-soft: rgba(16, 185, 129, 0.16);
+      --danger: #ef4444;
+      --warn: #f59e0b;
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: radial-gradient(circle at top, #13202d 0%, var(--bg) 60%);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      overflow: hidden;
+    }
+
+    .app-shell {
+      display: flex;
+      flex-direction: column;
+      height: 100dvh;
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 10px 12px;
+      gap: 10px;
+    }
+
+    .top-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 8px 12px;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      font-size: 14px;
+      letter-spacing: 0.02em;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--warn);
+      box-shadow: 0 0 8px var(--warn);
+      flex-shrink: 0;
+    }
+
+    .status-dot.online {
+      background: var(--accent);
+      box-shadow: 0 0 10px var(--accent);
+    }
+
+    .status-dot.offline {
+      background: var(--danger);
+      box-shadow: 0 0 8px var(--danger);
+    }
+
+    .metrics {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .badge {
+      background: var(--surface-elevated);
+      border: 1px solid var(--border);
+      padding: 3px 8px;
+      border-radius: 999px;
+    }
+
+    .controls-strip {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .preset-group {
+      display: flex;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 2px;
+      gap: 2px;
+    }
+
+    .preset-btn {
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .preset-btn.active {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .text-input-form {
+      display: flex;
+      flex: 1;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .text-input-form input {
+      flex: 1;
+      min-width: 0;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      padding: 7px 10px;
+      font-size: 13px;
+      outline: none;
+    }
+
+    .text-input-form input:focus {
+      border-color: var(--accent);
+    }
+
+    .send-btn {
+      border: 1px solid var(--border);
+      background: var(--surface-elevated);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 0 12px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .stage {
+      position: relative;
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #06090c;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      overflow: hidden;
+      padding: 6px;
+    }
+
+    #screenCanvas {
+      max-width: 100%;
+      max-height: 100%;
+      width: auto;
+      height: auto;
+      border-radius: 10px;
+      cursor: crosshair;
+      touch-action: none;
+      user-select: none;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
+    }
+
+    .overlay-msg {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 24px;
+      gap: 10px;
+      color: var(--muted);
+      background: rgba(11, 15, 20, 0.86);
+      font-size: 14px;
+    }
+
+    .overlay-msg.hidden {
+      display: none;
+    }
+
+    .adb-connect-box {
+      display: flex;
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    .adb-connect-box input {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 13px;
+      width: 170px;
+    }
+
+    .adb-connect-box button {
+      background: var(--accent);
+      color: #052e1e;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .nav-bar {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      flex-shrink: 0;
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+
+    .nav-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      height: 50px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.08s ease, background 0.15s ease, border-color 0.15s ease;
+    }
+
+    .nav-btn:active {
+      transform: scale(0.96);
+      background: var(--accent-soft);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .nav-btn svg {
+      width: 18px;
+      height: 18px;
+      fill: currentColor;
+    }
+
+    .ripple {
+      position: absolute;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 2px solid var(--accent);
+      background: var(--accent-soft);
+      transform: translate(-50%, -50%) scale(0.5);
+      pointer-events: none;
+      animation: rippleOut 0.42s ease-out forwards;
+    }
+
+    @keyframes rippleOut {
+      to {
+        transform: translate(-50%, -50%) scale(2.1);
+        opacity: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="top-bar">
+      <div class="brand">
+        <span id="statusDot" class="status-dot"></span>
+        <span>TermuxCast</span>
+      </div>
+      <div class="metrics">
+        <span id="resBadge" class="badge">-- x --</span>
+        <span id="fpsBadge" class="badge">0 FPS</span>
+        <span id="kbBadge" class="badge">0 KB</span>
+      </div>
+    </header>
+
+    <div class="controls-strip">
+      <div class="preset-group" role="group" aria-label="Stream quality">
+        <button class="preset-btn" data-preset="fast">Fast</button>
+        <button class="preset-btn active" data-preset="balanced">Balanced</button>
+        <button class="preset-btn" data-preset="sharp">Sharp</button>
+      </div>
+      <form id="textForm" class="text-input-form">
+        <input id="textInput" type="text" placeholder="Send text to phone..." autocomplete="off" />
+        <button type="submit" class="send-btn">Type</button>
+      </form>
+    </div>
+
+    <main id="stage" class="stage">
+      <canvas id="screenCanvas" width="540" height="1200"></canvas>
+      <div id="overlay" class="overlay-msg">
+        <strong id="overlayTitle">Connecting to TermuxCast server...</strong>
+        <span id="overlayDesc">Waiting for live ADB screen frames over WebSocket.</span>
+        <div class="adb-connect-box">
+          <input id="adbTarget" type="text" placeholder="127.0.0.1:5555" value="127.0.0.1:5555" />
+          <button id="adbConnectBtn" type="button">ADB Connect</button>
+        </div>
+      </div>
+    </main>
+
+    <nav class="nav-bar" aria-label="Android System Navigation">
+      <button class="nav-btn" data-key="back" aria-label="Back">
+        <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+        <span>Back</span>
+      </button>
+      <button class="nav-btn" data-key="home" aria-label="Home">
+        <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+        <span>Home</span>
+      </button>
+      <button class="nav-btn" data-key="recents" aria-label="Recent Apps">
+        <svg viewBox="0 0 24 24"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></svg>
+        <span>Recents</span>
+      </button>
+    </nav>
+  </div>
+
+  <script>
+    const socket = io({ transports: ["websocket", "polling"] });
+
+    const canvas = document.getElementById("screenCanvas");
+    const ctx = canvas.getContext("2d");
+    const stage = document.getElementById("stage");
+    const overlay = document.getElementById("overlay");
+    const overlayTitle = document.getElementById("overlayTitle");
+    const overlayDesc = document.getElementById("overlayDesc");
+    const statusDot = document.getElementById("statusDot");
+    const resBadge = document.getElementById("resBadge");
+    const fpsBadge = document.getElementById("fpsBadge");
+    const kbBadge = document.getElementById("kbBadge");
+
+    let deviceWidth = 1080;
+    let deviceHeight = 2400;
+    let hasFirstFrame = false;
+    let pointerStart = null;
+    const frameImg = new Image();
+
+    frameImg.onload = () => {
+      if (canvas.width !== frameImg.naturalWidth || canvas.height !== frameImg.naturalHeight) {
+        canvas.width = frameImg.naturalWidth;
+        canvas.height = frameImg.naturalHeight;
+      }
+      ctx.drawImage(frameImg, 0, 0, canvas.width, canvas.height);
+      if (!hasFirstFrame) {
+        hasFirstFrame = true;
+        overlay.classList.add("hidden");
+      }
+    };
+
+    socket.on("connect", () => {
+      statusDot.className = "status-dot online";
+      overlayTitle.textContent = "Connected — waiting for frame...";
+      overlayDesc.textContent = "Ensure local ADB is paired and connected in Termux.";
+    });
+
+    socket.on("disconnect", () => {
+      statusDot.className = "status-dot offline";
+      overlay.classList.remove("hidden");
+      overlayTitle.textContent = "Disconnected from server";
+      overlayDesc.textContent = "Trying to reconnect to Flask-SocketIO...";
+    });
+
+    socket.on("adb_status", (status) => {
+      if (status.width && status.height) {
+        deviceWidth = status.width;
+        deviceHeight = status.height;
+        resBadge.textContent = `${deviceWidth} x ${deviceHeight}`;
+      }
+      if (status.error) {
+        statusDot.className = "status-dot";
+        overlayTitle.textContent = "ADB Screen Capture Waiting";
+        overlayDesc.textContent = status.error;
+      } else if (status.connected) {
+        statusDot.className = "status-dot online";
+      }
+      if (status.preset) {
+        document.querySelectorAll(".preset-btn").forEach((btn) => {
+          btn.classList.toggle("active", btn.dataset.preset === status.preset);
+        });
+      }
+    });
+
+    socket.on("screen_frame", (payload) => {
+      if (payload.width && payload.height) {
+        deviceWidth = payload.width;
+        deviceHeight = payload.height;
+        resBadge.textContent = `${deviceWidth} x ${deviceHeight}`;
+      }
+      if (payload.fps !== undefined) {
+        fpsBadge.textContent = `${payload.fps} FPS`;
+      }
+      if (payload.kb !== undefined) {
+        kbBadge.textContent = `${payload.kb} KB`;
+      }
+      frameImg.src = `data:${payload.mime};base64,${payload.image}`;
+    });
+
+    function toDeviceCoords(clientX, clientY) {
+      const rect = canvas.getBoundingClientRect();
+      const normX = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      const normY = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+      return {
+        x: Math.round(normX * deviceWidth),
+        y: Math.round(normY * deviceHeight),
+      };
+    }
+
+    function showRipple(clientX, clientY) {
+      const stageRect = stage.getBoundingClientRect();
+      const ripple = document.createElement("div");
+      ripple.className = "ripple";
+      ripple.style.left = `${clientX - stageRect.left}px`;
+      ripple.style.top = `${clientY - stageRect.top}px`;
+      stage.appendChild(ripple);
+      ripple.addEventListener("animationend", () => ripple.remove());
+    }
+
+    canvas.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      canvas.setPointerCapture(e.pointerId);
+      const pt = toDeviceCoords(e.clientX, e.clientY);
+      pointerStart = {
+        ...pt,
+        clientX: e.clientX,
+        clientY: e.clientY,
+        time: performance.now(),
+      };
+      showRipple(e.clientX, e.clientY);
+    });
+
+    canvas.addEventListener("pointerup", (e) => {
+      if (!pointerStart) return;
+      const endPt = toDeviceCoords(e.clientX, e.clientY);
+      const dx = e.clientX - pointerStart.clientX;
+      const dy = e.clientY - pointerStart.clientY;
+      const dist = Math.hypot(dx, dy);
+      const elapsed = Math.round(performance.now() - pointerStart.time);
+
+      if (dist < 12) {
+        socket.emit("tap", { x: endPt.x, y: endPt.y });
+      } else {
+        socket.emit("swipe", {
+          x1: pointerStart.x,
+          y1: pointerStart.y,
+          x2: endPt.x,
+          y2: endPt.y,
+          duration_ms: Math.max(120, Math.min(1200, elapsed)),
+        });
+        showRipple(e.clientX, e.clientY);
+      }
+      pointerStart = null;
+    });
+
+    canvas.addEventListener("pointercancel", () => {
+      pointerStart = null;
+    });
+
+    document.querySelectorAll(".nav-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        socket.emit("keyevent", { action: btn.dataset.key });
+      });
+    });
+
+    document.querySelectorAll(".preset-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        socket.emit("stream_config", { preset: btn.dataset.preset });
+      });
+    });
+
+    document.getElementById("textForm").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const input = document.getElementById("textInput");
+      const val = input.value;
+      if (val.trim()) {
+        socket.emit("send_text", { text: val });
+        input.value = "";
+      }
+    });
+
+    document.getElementById("adbConnectBtn").addEventListener("click", () => {
+      const target = document.getElementById("adbTarget").value.trim();
+      if (target) {
+        socket.emit("adb_connect", { target });
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">TermuxCast</string>
+    <string name="nav_studio">Control</string>
+    <string name="nav_setup">Termux Setup</string>
+    <string name="nav_files">Server Files</string>
+    <string name="action_copy">Copy</string>
+    <string name="action_share">Share</string>
+    <string name="copied_toast">Copied to clipboard</string>
+    <string name="accessibility_service_description">Allows TermuxCast to inject remote taps, swipes, and navigation actions (Back, Home, Recents) received from your connected browser on the same Wi-Fi or Hotspot.</string>
+    <string name="cast_notification_title">TermuxCast Live Host Active</string>
+    <string name="cast_notification_channel">Screen Cast Server</string>
+</resources>
