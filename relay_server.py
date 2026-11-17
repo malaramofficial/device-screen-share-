@@ -323,11 +323,8 @@ def view_room(room_id):
     return render_template_string(VIEWER_HTML, room_id=room_id)
 
 
-@sock.route("/ws/host/<room_id>")
-# Backward-compatible alias for older app settings that saved the public
-# viewer URL as the relay base URL.
-@sock.route("/view/<viewer_room_id>/ws/host/<room_id>")
-def ws_host(ws, room_id, viewer_room_id=None):
+def _handle_ws_host(ws, room_id):
+
     with rooms_lock:
         host_sockets[room_id] = ws
         viewers = list(viewer_sockets[room_id])
@@ -380,6 +377,20 @@ def ws_host(ws, room_id, viewer_room_id=None):
                 v.send(json.dumps({"type": "host_offline"}))
             except Exception:
                 pass
+
+
+# Register each Flask-Sock route separately. Sock.route registers the endpoint
+# and returns None, so stacking these decorators breaks the WebSocket handler.
+@sock.route("/ws/host/<room_id>")
+def ws_host(ws, room_id):
+    return _handle_ws_host(ws, room_id)
+
+
+# Backward-compatible alias for older app settings that saved the public
+# viewer URL as the relay base URL.
+@sock.route("/view/<viewer_room_id>/ws/host/<room_id>")
+def ws_host_legacy(ws, viewer_room_id, room_id):
+    return _handle_ws_host(ws, room_id)
 
 
 @sock.route("/ws/viewer/<room_id>")
