@@ -10,9 +10,10 @@ app = Flask(__name__)
 sock = Sock(app)
 
 rooms_lock = threading.Lock()
-host_sockets = {}               # room_id -> ws
+host_sockets = {}                  # room_id -> ws
 viewer_sockets = defaultdict(set)  # room_id -> set(ws)
-latest_meta = {}                # room_id -> {"width": int, "height": int}
+latest_meta = {}                   # room_id -> {"width": int, "height": int}
+latest_frame = {}                  # room_id -> bytes (last JPEG frame)
 
 
 VIEWER_HTML = """<!DOCTYPE html>
@@ -43,7 +44,7 @@ VIEWER_HTML = """<!DOCTYPE html>
       border-radius: 14px; padding: 8px 12px; gap: 8px; flex-shrink: 0;
     }
     .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; }
-    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--warn); }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--warn); flex-shrink: 0; }
     .dot.online { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
     .dot.offline { background: var(--danger); }
     .badges { display: flex; gap: 6px; font-family: monospace; font-size: 11px; color: var(--muted); }
@@ -106,7 +107,7 @@ VIEWER_HTML = """<!DOCTYPE html>
   <script>
     const roomId = {{ room_id|tojson }};
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${proto}//${location.host}/ws/viewer/${encodeURIComponent(roomId)}`;
+    const wsUrl = \`\${proto}//\${location.host}/ws/viewer/\${encodeURIComponent(roomId)}\`;
     const canvas = document.getElementById("screenCanvas");
     const ctx = canvas.getContext("2d");
     const stage = document.getElementById("stage");
@@ -122,6 +123,45 @@ VIEWER_HTML = """<!DOCTYPE html>
     let hasFrame = false;
     let startPt = null;
     let frameTimestamps = [];
+    let isDrawing = false;
+    let pendingBlob = null;
+
+    function drawBlobFrame(blob) {
+      if (isDrawing) {
+        pendingBlob = blob;
+        return;
+      }
+      isDrawing = true;
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => {
+        if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight) {
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+        }
+        ctx.drawImage(img, 0, 0);
+        URL.revokeObjectURL(url);
+        if (!hasFrame) {
+          hasFrame = true;
+          overlay.classList.add("hidden");
+        }
+        const now = performance.now();
+        frameTimestamps.push(now);
+        frameTimestamps = frameTimestamps.filter((t) => now - t < 1000);
+        fpsBadge.textContent = \`\${frameTimestamps.length} FPS\`;
+        isDrawing = false;
+        if (pendingBlob) {
+          const next = pendingBlob;
+          pendingBlob = null;
+          drawBlobFrame(next);
+        }
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        isDrawing = false;
+      };
+      img.src = url;
+    }
 
     function connect() {
       ws = new WebSocket(wsUrl);
@@ -138,13 +178,13 @@ VIEWER_HTML = """<!DOCTYPE html>
         overlayDesc.textContent = "Reconnecting in 2 seconds...";
         setTimeout(connect, 2000);
       };
-      ws.onmessage = async (ev) => {
+      ws.onmessage = (ev) => {
         if (typeof ev.data === "string") {
           try {
             const msg = JSON.parse(ev.data);
             if (msg.width && msg.height) {
               devW = msg.width; devH = msg.height;
-              resBadge.textContent = `${devW} x ${devH}`;
+              resBadge.textContent = \`\${devW} x \${devH}\`;
             }
             if (msg.type === "host_offline") {
               overlay.classList.remove("hidden");
@@ -154,18 +194,8 @@ VIEWER_HTML = """<!DOCTYPE html>
           } catch (_) {}
           return;
         }
-        const blob = new Blob([ev.data], { type: "image/jpeg" });
-        const bmp = await createImageBitmap(blob);
-        if (canvas.width !== bmp.width || canvas.height !== bmp.height) {
-          canvas.width = bmp.width; canvas.height = bmp.height;
-        }
-        ctx.drawImage(bmp, 0, 0);
-        bmp.close();
-        if (!hasFrame) { hasFrame = true; overlay.classList.add("hidden"); }
-        const now = performance.now();
-        frameTimestamps.push(now);
-        frameTimestamps = frameTimestamps.filter((t) => now - t < 1000);
-        fpsBadge.textContent = `${frameTimestamps.length} FPS`;
+        const blob = ev.data instanceof Blob ? ev.data : new Blob([ev.data], { type: "image/jpeg" });
+        drawBlobFrame(blob);
       };
     }
     connect();
@@ -181,8 +211,8 @@ VIEWER_HTML = """<!DOCTYPE html>
       const sr = stage.getBoundingClientRect();
       const el = document.createElement("div");
       el.className = "ripple";
-      el.style.left = `${cx - sr.left}px`;
-      el.style.top = `${cy - sr.top}px`;
+      el.style.left = \`\${cx - sr.left}px\`;
+      el.style.top = \`\${cy - sr.top}px\`;
       stage.appendChild(el);
       el.addEventListener("animationend", () => el.remove());
     }
@@ -247,9 +277,16 @@ def ws_host(ws, room_id):
     with rooms_lock:
         host_sockets[room_id] = ws
         viewers = list(viewer_sockets[room_id])
+        viewer_count = len(viewers)
     for v in viewers:
         try:
             v.send(json.dumps({"type": "host_online"}))
+        except Exception:
+            pass
+    if viewer_count > 0:
+        try:
+            ws.send(json.dumps({"type": "viewer_count", "count": viewer_count}))
+            ws.send(json.dumps({"type": "request_frame"}))
         except Exception:
             pass
 
@@ -266,6 +303,9 @@ def ws_host(ws, room_id):
                             latest_meta[room_id] = {"width": meta["width"], "height": meta["height"]}
                 except Exception:
                     pass
+            elif isinstance(msg, (bytes, bytearray)):
+                with rooms_lock:
+                    latest_frame[room_id] = bytes(msg)
             with rooms_lock:
                 viewers = list(viewer_sockets[room_id])
             for v in viewers:
@@ -291,15 +331,24 @@ def ws_viewer(ws, room_id):
     with rooms_lock:
         viewer_sockets[room_id].add(ws)
         meta = latest_meta.get(room_id)
+        cached_frame = latest_frame.get(room_id)
         host_ws = host_sockets.get(room_id)
+        count = len(viewer_sockets[room_id])
+
     if meta:
         try:
             ws.send(json.dumps({"type": "meta", **meta}))
         except Exception:
             pass
+    if cached_frame:
+        try:
+            ws.send(cached_frame)
+        except Exception:
+            pass
     if host_ws:
         try:
-            host_ws.send(json.dumps({"type": "viewer_count", "count": len(viewer_sockets[room_id])}))
+            host_ws.send(json.dumps({"type": "viewer_count", "count": count}))
+            host_ws.send(json.dumps({"type": "request_frame"}))
         except Exception:
             pass
 
