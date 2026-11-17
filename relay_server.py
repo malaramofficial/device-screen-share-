@@ -64,7 +64,7 @@ VIEWER_HTML = """<!DOCTYPE html>
     }
     .overlay.hidden { display: none; }
     .nav {
-      display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; flex-shrink: 0;
+      display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; flex-shrink: 0;
       padding-bottom: env(safe-area-inset-bottom, 0px);
     }
     .nav button {
@@ -88,7 +88,6 @@ VIEWER_HTML = """<!DOCTYPE html>
       <div class="badges">
         <span id="resBadge" class="badge">-- x --</span>
         <span id="fpsBadge" class="badge">0 FPS</span>
-        <button id="audioEnable" class="badge" style="color:var(--text);cursor:pointer">🔊 Enable audio</button>
       </div>
     </header>
     <main id="stage" class="stage">
@@ -103,6 +102,7 @@ VIEWER_HTML = """<!DOCTYPE html>
       <button onclick="sendKey('home')">● Home</button>
       <button onclick="sendKey('recents')">■ Recents</button>
       <button onclick="sendKey('notifications')">▾ Shade</button>
+      <button id="audioEnable" onclick="enableAudio()">🔊 Audio</button>
     </nav>
   </div>
   <script>
