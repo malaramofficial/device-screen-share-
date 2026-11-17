@@ -119,8 +119,33 @@ fun ScreenShareGateScreen(
       launchProjectionConsent()
     }
 
+  val audioPermissionLauncher =
+    rememberLauncherForActivityResult(
+      contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+      if (granted) {
+        if (
+          Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+              PackageManager.PERMISSION_GRANTED
+        ) {
+          notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+          launchProjectionConsent()
+        }
+      } else {
+        promptDeniedMessage = "Audio permission is required to share video sound. Please allow it and start again."
+      }
+    }
+
   val requestScreenShareGate: () -> Unit = {
     if (
+      Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+        ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) !=
+          PackageManager.PERMISSION_GRANTED
+    ) {
+      audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    } else if (
       Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
           PackageManager.PERMISSION_GRANTED
