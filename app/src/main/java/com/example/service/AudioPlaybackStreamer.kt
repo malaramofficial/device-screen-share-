@@ -4,7 +4,6 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
-import android.media.AudioTrack
 import android.media.MediaRecorder
 import android.media.projection.MediaProjection
 import android.os.Build
@@ -72,6 +71,8 @@ class AudioPlaybackStreamer(
             throw IllegalStateException("AudioRecord read failed: $count")
           }
         }
+      } catch (e: SecurityException) {
+        if (running.get()) onError("Playback audio permission was denied. Allow audio capture and try again.")
       } catch (e: Exception) {
         if (running.get()) onError(e.localizedMessage ?: "Playback audio capture failed.")
       } finally {
