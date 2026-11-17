@@ -107,7 +107,7 @@ VIEWER_HTML = """<!DOCTYPE html>
   <script>
     const roomId = {{ room_id|tojson }};
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = \`\${proto}//\${location.host}/ws/viewer/\${encodeURIComponent(roomId)}\`;
+    const wsUrl = \`${proto}//${location.host}/ws/viewer/${encodeURIComponent(roomId)}\`;
     const canvas = document.getElementById("screenCanvas");
     const ctx = canvas.getContext("2d");
     const stage = document.getElementById("stage");
@@ -148,7 +148,7 @@ VIEWER_HTML = """<!DOCTYPE html>
         const now = performance.now();
         frameTimestamps.push(now);
         frameTimestamps = frameTimestamps.filter((t) => now - t < 1000);
-        fpsBadge.textContent = \`\${frameTimestamps.length} FPS\`;
+        fpsBadge.textContent = \`${frameTimestamps.length} FPS\`;
         isDrawing = false;
         if (pendingBlob) {
           const next = pendingBlob;
@@ -184,7 +184,7 @@ VIEWER_HTML = """<!DOCTYPE html>
             const msg = JSON.parse(ev.data);
             if (msg.width && msg.height) {
               devW = msg.width; devH = msg.height;
-              resBadge.textContent = \`\${devW} x \${devH}\`;
+              resBadge.textContent = \`${devW} x ${devH}\`;
             }
             if (msg.type === "host_offline") {
               overlay.classList.remove("hidden");
@@ -211,8 +211,8 @@ VIEWER_HTML = """<!DOCTYPE html>
       const sr = stage.getBoundingClientRect();
       const el = document.createElement("div");
       el.className = "ripple";
-      el.style.left = \`\${cx - sr.left}px\`;
-      el.style.top = \`\${cy - sr.top}px\`;
+      el.style.left = \`${cx - sr.left}px\`;
+      el.style.top = \`${cy - sr.top}px\`;
       stage.appendChild(el);
       el.addEventListener("animationend", () => el.remove());
     }
