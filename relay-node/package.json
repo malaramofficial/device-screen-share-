@@ -1,0 +1,9 @@
+{
+  "name": "netsetu-relay-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WebSocket relay for NetSetu Android internet sharing",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "ws": "^8.18.0" }
+}
